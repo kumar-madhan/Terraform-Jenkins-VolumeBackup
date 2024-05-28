@@ -1,0 +1,210 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Parameters": {
+      "EBSVolumeBinSnapshotId": {
+        "Type": "String",
+        "Description": "Snapshot ID for EBSVolumeBin"
+      },
+      "EBSVolumeDomSnapshotId": {
+        "Type": "String",
+        "Description": "Snapshot ID for EBSVolumeDom"
+      },
+      "EBSVolumeLogSnapshotId": {
+        "Type": "String",
+        "Description": "Snapshot ID for EBSVolumeLog"
+      }
+    },
+    "Resources": {
+      "MyVPC": {
+        "Type": "AWS::EC2::VPC",
+        "Properties": {
+          "CidrBlock": "10.0.0.0/16"
+        }
+      },
+      "Subnet1": {
+        "Type": "AWS::EC2::Subnet",
+        "Properties": {
+          "VpcId": { "Ref": "MyVPC" },
+          "CidrBlock": "10.0.0.0/24",
+          "AvailabilityZone": "us-east-1a",
+          "MapPublicIpOnLaunch": true
+        }
+      },
+      "Subnet2": {
+        "Type": "AWS::EC2::Subnet",
+        "Properties": {
+          "VpcId": { "Ref": "MyVPC" },
+          "CidrBlock": "10.0.1.0/24",
+          "AvailabilityZone": "us-east-1b",
+          "MapPublicIpOnLaunch": true
+        }
+      },
+      "InternetGateway": {
+        "Type": "AWS::EC2::InternetGateway"
+      },
+      "AttachGateway": {
+        "Type": "AWS::EC2::VPCGatewayAttachment",
+        "Properties": {
+          "VpcId": { "Ref": "MyVPC" },
+          "InternetGatewayId": { "Ref": "InternetGateway" }
+        }
+      },
+      "RouteTable": {
+        "Type": "AWS::EC2::RouteTable",
+        "Properties": {
+          "VpcId": { "Ref": "MyVPC" }
+        }
+      },
+      "DefaultRoute": {
+        "Type": "AWS::EC2::Route",
+        "Properties": {
+          "RouteTableId": { "Ref": "RouteTable" },
+          "DestinationCidrBlock": "0.0.0.0/0",
+          "GatewayId": { "Ref": "InternetGateway" }
+        }
+      },
+      "RouteTableAssociation1": {
+        "Type": "AWS::EC2::SubnetRouteTableAssociation",
+        "Properties": {
+          "SubnetId": { "Ref": "Subnet1" },
+          "RouteTableId": { "Ref": "RouteTable" }
+        }
+      },
+      "RouteTableAssociation2": {
+        "Type": "AWS::EC2::SubnetRouteTableAssociation",
+        "Properties": {
+          "SubnetId": { "Ref": "Subnet2" },
+          "RouteTableId": { "Ref": "RouteTable" }
+        }
+      },
+      "SecurityGroup": {
+        "Type": "AWS::EC2::SecurityGroup",
+        "Properties": {
+          "GroupDescription": "Allow TLS inbound traffic and all outbound traffic",
+          "VpcId": { "Ref": "MyVPC" },
+          "SecurityGroupIngress": [
+            {
+              "IpProtocol": "tcp",
+              "FromPort": 80,
+              "ToPort": 80,
+              "CidrIp": "0.0.0.0/0",
+              "Description": "Web-Traffic"
+            },
+            {
+              "IpProtocol": "tcp",
+              "FromPort": 22,
+              "ToPort": 22,
+              "CidrIp": "0.0.0.0/0",
+              "Description": "SSH-Traffic"
+            }
+          ],
+          "SecurityGroupEgress": [
+            {
+              "IpProtocol": "tcp",
+              "FromPort": 0,
+              "ToPort": 0,
+              "CidrIp": "0.0.0.0/0",
+              "Description": "Access Outer World"
+            }
+          ],
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "allow_traffic"
+            }
+          ]
+        }
+      },
+      "EBSVolumeBin": {
+        "Type": "AWS::EC2::Volume",
+        "Properties": {
+          "AvailabilityZone": "us-east-1a",
+          "SnapshotId": { "Ref": "EBSVolumeBinSnapshotId" },
+          "Size": 5,
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "bin"
+            }
+          ]
+        }
+      },
+      "EBSVolumeDom": {
+        "Type": "AWS::EC2::Volume",
+        "Properties": {
+          "AvailabilityZone": "us-east-1a",
+          "SnapshotId": { "Ref": "EBSVolumeDomSnapshotId" },
+          "Size": 5,
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "dom"
+            }
+          ]
+        }
+      },
+      "EBSVolumeLog": {
+        "Type": "AWS::EC2::Volume",
+        "Properties": {
+          "AvailabilityZone": "us-east-1a",
+          "SnapshotId": { "Ref": "EBSVolumeLogSnapshotId" },
+          "Size": 5,
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "log"
+            }
+          ]
+        }
+      },
+      "WebServerInstance": {
+        "Type": "AWS::EC2::Instance",
+        "Properties": {
+          "ImageId": "ami-04b70fa74e45c3917",
+          "InstanceType": "t2.micro",
+          "SecurityGroupIds": [{ "Ref": "SecurityGroup" }],
+          "SubnetId": { "Ref": "Subnet1" },
+          "UserData": { "Fn::Base64": { "Fn::Join": ["", ["#!/bin/bash\n", { "Ref": "UserDataScript" }]] } },
+          "BlockDeviceMappings": [
+            {
+              "DeviceName": "/dev/sda1",
+              "Ebs": {
+                "VolumeSize": 10
+              }
+            }
+          ],
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "web_server_1"
+            }
+          ]
+        }
+      },
+      "VolumeAttachmentBin": {
+        "Type": "AWS::EC2::VolumeAttachment",
+        "Properties": {
+          "InstanceId": { "Ref": "WebServerInstance" },
+          "VolumeId": { "Ref": "EBSVolumeBin" },
+          "Device": "/dev/sdf"
+        }
+      },
+      "VolumeAttachmentDom": {
+        "Type": "AWS::EC2::VolumeAttachment",
+        "Properties": {
+          "InstanceId": { "Ref": "WebServerInstance" },
+          "VolumeId": { "Ref": "EBSVolumeDom" },
+          "Device": "/dev/sdg"
+        }
+      },
+      "VolumeAttachmentLog": {
+        "Type": "AWS::EC2::VolumeAttachment",
+        "Properties": {
+          "InstanceId": { "Ref": "WebServerInstance" },
+          "VolumeId": { "Ref": "EBSVolumeLog" },
+          "Device": "/dev/sdh"
+        }
+      }
+    }
+  }
+  
