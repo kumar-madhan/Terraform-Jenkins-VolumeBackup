@@ -1,5 +1,7 @@
 pipeline {
-    agent any
+    agent {
+        label 'Build_Node'
+    }
     
     environment {
         AWS_CREDENTIALS_ID = 'aws-creds'
@@ -8,12 +10,27 @@ pipeline {
         VOLUME_TAGS = 'EBSVolumeBin,EBSVolumeDom,EBSVolumeLog'
         
         STACK_NAME = 'AWS-WEB-SERVER'
+        VERSION = 'MAY-2824'
         Role = 'App'
         UserId = 'Kumar-madhan'
         App_ID = 'Web-App-01'
     }
     
     stages {
+        stage('Checkout'){
+            steps{
+                cleanWs()
+                // Checkout the code from the Git repository
+                checkout([
+                  $class: 'GitSCM',
+                  gitTool: 'default',
+                  branches: [[name: 'main']],
+                  doGenerateSubmoduleConfigurations: false,
+                  submoduleCfg: [],
+                  userRemoteConfigs: [[credentialsId: 'git-ssh', url: 'git@github.com:kumar-madhan/Terraform-Jenkins-VolumeBackup.git']]
+                ])
+            }
+        }
         stage('Create Snapshots') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDENTIALS_ID}"]]) {
@@ -81,24 +98,28 @@ pipeline {
                     }
                 }
             }
-        },
-        stage('Deploy CloudFormation') {
-            steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDENTIALS_ID}"]]) {
-                    script {
-                        def snapshotInfo = readJSON file: 'snapshot_info.json'
-                        
-                        def params = snapshotInfo.collect { k, v -> ["ParameterKey": k, "ParameterValue": v] }
-
-                        // Deploy CloudFormation stack with the specified region
-                        sh """
-                            aws cloudformation deploy --template-file updated_template.json \
-                                                    --stack-name ${STACK_NAME} \
-                                                    --parameter-overrides ${params.collect { p -> "${p.ParameterKey}=${p.ParameterValue}" }.join(' ')} \
-                                                    --region ${REGION}
-                        """
-                    }
-                }
+        }
+        stage('Modify CF-Template'){
+            steps{
+                sh '''
+                # Read the snapshot information from snapshot_info.json
+                snapshot_info=$(cat snapshot_info.json)
+                
+                # Update the CloudFormation template with the snapshot IDs using jq
+                updated_template=$(jq --argjson snapshot_info "$snapshot_info" '.Resources.EBSVolumeBin.Properties.SnapshotId = $snapshot_info.EBSVolumeBin | .Resources.EBSVolumeDom.Properties.SnapshotId = $snapshot_info.EBSVolumeDom | .Resources.EBSVolumeLog.Properties.SnapshotId = $snapshot_info.EBSVolumeLog' cf-template-snapid.json)
+                
+                # Save the updated CloudFormation template
+                echo "$updated_template" > cf-template-snapid.json
+                '''
+            }
+        }
+        stage('Creating New Instance'){
+            steps{
+                sh """
+                aws cloudformation deploy \
+  --template-file cf-template-snapid.json \
+  --stack-name ${STACK_NAME}-${VERSION}
+                """
             }
         }
     }
